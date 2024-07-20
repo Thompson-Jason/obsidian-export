@@ -88,8 +88,8 @@ pub fn remove_obsidian_comments(
     events: &mut MarkdownEvents,
 ) -> PostprocessorResult {
     let mut output = Vec::with_capacity(events.len());
-
     let mut inside_comment = false;
+    let mut inside_codeblock = false;
 
     for event in &mut *events {
         output.push(event.to_owned());
@@ -101,10 +101,7 @@ pub fn remove_obsidian_comments(
                         output.pop();
                     }
                     continue;
-                }
-
-                if text.contains("|%%") {
-                    println!("Escape ----- {:?}", output);
+                } else if inside_codeblock {
                     continue;
                 }
 
@@ -124,6 +121,13 @@ pub fn remove_obsidian_comments(
 
                 inside_comment = true;
             }
+            Event::Start(Tag::CodeBlock(_)) => {
+                inside_codeblock = true;
+            }
+            Event::End(Tag::CodeBlock(_)) => {
+                inside_codeblock = false;
+            }
+
             _ => {
                 if inside_comment {
                     output.pop();
