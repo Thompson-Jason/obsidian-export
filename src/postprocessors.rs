@@ -1,8 +1,10 @@
 //! A collection of officially maintained [postprocessors][crate::Postprocessor].
 
 use super::{Context, MarkdownEvents, PostprocessorResult};
-use pulldown_cmark::Event;
+use pulldown_cmark::{CodeBlockKind, CowStr, Event, Tag};
+use regex::Regex;
 use serde_yaml::Value;
+use std::string::String;
 
 /// This postprocessor converts all soft line breaks to hard line breaks. Enabling this mimics
 /// Obsidian's _'Strict line breaks'_ setting.
@@ -49,6 +51,89 @@ fn filter_by_tags_(
     } else {
         PostprocessorResult::Continue
     }
+}
+
+pub fn remove_toc(_context: &mut Context, events: &mut MarkdownEvents) -> PostprocessorResult {
+    let mut output = Vec::with_capacity(events.len());
+
+    for event in &mut *events {
+        output.push(event.to_owned());
+        match event {
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(ref language_tag))) => {
+                if language_tag != &CowStr::from("toc")
+                    && language_tag != &CowStr::from("table-of-contents")
+                {
+                    continue;
+                }
+                output.pop(); // Remove codeblock start tag that was pushed onto output
+            }
+            Event::End(Tag::CodeBlock(CodeBlockKind::Fenced(ref language_tag))) => {
+                if language_tag == &CowStr::from("toc")
+                    && language_tag != &CowStr::from("table-of-contents")
+                {
+                    // The corresponding codeblock start tag for this is replaced with regular
+                    // text (containing the Hugo shortcode), so we must also pop this end tag.
+                    output.pop();
+                }
+            }
+            _ => {}
+        }
+    }
+    *events = output;
+    PostprocessorResult::Continue
+}
+
+pub fn remove_obsidian_comments(
+    _context: &mut Context,
+    events: &mut MarkdownEvents,
+) -> PostprocessorResult {
+    let mut output = Vec::with_capacity(events.len());
+
+    let mut inside_comment = false;
+
+    for event in &mut *events {
+        output.push(event.to_owned());
+
+        match event {
+            Event::Text(ref text) => {
+                if !text.contains("%%") {
+                    if inside_comment {
+                        output.pop();
+                    }
+                    continue;
+                }
+
+                if text.contains("|%%") {
+                    println!("Escape ----- {:?}", output);
+                    continue;
+                }
+
+                output.pop();
+
+                if inside_comment {
+                    inside_comment = false;
+                    continue;
+                }
+
+                if !text.eq(&CowStr::from("%%")) {
+                    let re = Regex::new(r"%%.*?%%").unwrap();
+                    let result = re.replace_all(text, "").to_string();
+                    output.push(Event::Text(CowStr::from(result)));
+                    continue;
+                }
+
+                inside_comment = true;
+            }
+            _ => {
+                if inside_comment {
+                    output.pop();
+                }
+            }
+        }
+    }
+
+    *events = output;
+    PostprocessorResult::Continue
 }
 
 #[test]

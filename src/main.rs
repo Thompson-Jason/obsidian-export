@@ -60,6 +60,20 @@ struct Opts {
         default = "false"
     )]
     hard_linebreaks: bool,
+
+    #[options(
+        no_short,
+        help = "Remove automatic-table-of-contents objects",
+        default = "false"
+    )]
+    remove_table_of_contents: bool,
+
+    #[options(
+        no_short,
+        help = "Remove Obsidian style comments from exported file",
+        default = "false"
+    )]
+    remove_obsidian_comments: bool,
 }
 
 fn frontmatter_strategy_from_str(input: &str) -> Result<FrontmatterStrategy> {
@@ -98,6 +112,14 @@ fn main() {
 
     if args.hard_linebreaks {
         exporter.add_postprocessor(&softbreaks_to_hardbreaks);
+    }
+
+    if args.remove_table_of_contents {
+        exporter.add_postprocessor(&remove_toc);
+    }
+
+    if args.remove_obsidian_comments {
+        exporter.add_postprocessor(&remove_obsidian_comments);
     }
 
     let tags_postprocessor = filter_by_tags(args.skip_tags, args.only_tags);
