@@ -133,7 +133,6 @@ pub fn remove_obsidian_comments(
                     output.pop();
                 }
             }
-
             _ => {
                 if inside_comment {
                     output.pop();
@@ -142,7 +141,6 @@ pub fn remove_obsidian_comments(
         }
     }
 
-    eprintln!("{:?}", output);
     *events = output;
     PostprocessorResult::Continue
 }

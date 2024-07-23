@@ -7,8 +7,6 @@ use pulldown_cmark::{CowStr, Event};
 use serde_yaml::Value;
 use std::collections::HashSet;
 use std::fs::{read_to_string, remove_file};
-use std::io;
-use std::io::{stderr, Write};
 use std::path::PathBuf;
 use std::sync::Mutex;
 use tempfile::TempDir;
@@ -308,8 +306,6 @@ fn test_remove_obsidian_comments() {
     let expected =
         read_to_string("tests/testdata/expected/remove-comments/test-comments.md").unwrap();
     let actual = read_to_string(tmp_dir.path().join(PathBuf::from("test-comments.md"))).unwrap();
-    eprintln!("Expected ----- {:?}", expected);
-    eprintln!("Actual ----- {:?}", actual);
 
     assert_eq!(expected, actual);
 }
