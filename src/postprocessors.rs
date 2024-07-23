@@ -129,6 +129,7 @@ pub fn remove_obsidian_comments(
             }
             Event::End(Tag::Paragraph) => {
                 if output[output.len() - 2] == Event::Start(Tag::Paragraph) {
+                    // If the comment was the only item on the line remove the start and end paragraph events to remove the \n in the output file.
                     output.pop();
                     output.pop();
                 }
@@ -140,7 +141,6 @@ pub fn remove_obsidian_comments(
             }
         }
     }
-
     *events = output;
     PostprocessorResult::Continue
 }
