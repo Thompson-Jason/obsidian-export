@@ -60,16 +60,15 @@ pub fn remove_toc(_context: &mut Context, events: &mut MarkdownEvents) -> Postpr
         output.push(event.to_owned());
         match event {
             Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(ref language_tag))) => {
-                if language_tag != &CowStr::from("toc")
-                    && language_tag != &CowStr::from("table-of-contents")
+                if language_tag == &CowStr::from("toc")
+                    || language_tag == &CowStr::from("table-of-contents")
                 {
-                    continue;
+                    output.pop(); // Remove codeblock start tag that was pushed onto output
                 }
-                output.pop(); // Remove codeblock start tag that was pushed onto output
             }
             Event::End(Tag::CodeBlock(CodeBlockKind::Fenced(ref language_tag))) => {
                 if language_tag == &CowStr::from("toc")
-                    && language_tag != &CowStr::from("table-of-contents")
+                    || language_tag == &CowStr::from("table-of-contents")
                 {
                     // The corresponding codeblock start tag for this is replaced with regular
                     // text (containing the Hugo shortcode), so we must also pop this end tag.
@@ -79,6 +78,7 @@ pub fn remove_toc(_context: &mut Context, events: &mut MarkdownEvents) -> Postpr
             _ => {}
         }
     }
+    eprintln!("OUTPUT ---- {:?}", output);
     *events = output;
     PostprocessorResult::Continue
 }
@@ -98,11 +98,11 @@ pub fn remove_obsidian_comments(
             Event::Text(ref text) => {
                 if !text.contains("%%") {
                     if inside_comment {
-                        output.pop();
+                        output.pop(); //Inside block comment so remove
                     }
                     continue;
                 } else if inside_codeblock {
-                    continue;
+                    continue; //Skip anything inside codeblocks
                 }
 
                 output.pop();
@@ -127,6 +127,12 @@ pub fn remove_obsidian_comments(
             Event::End(Tag::CodeBlock(_)) => {
                 inside_codeblock = false;
             }
+            Event::End(Tag::Paragraph) => {
+                if output[output.len() - 2] == Event::Start(Tag::Paragraph) {
+                    output.pop();
+                    output.pop();
+                }
+            }
 
             _ => {
                 if inside_comment {
@@ -136,6 +142,7 @@ pub fn remove_obsidian_comments(
         }
     }
 
+    eprintln!("{:?}", output);
     *events = output;
     PostprocessorResult::Continue
 }
