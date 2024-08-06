@@ -1,10 +1,10 @@
 //! A collection of officially maintained [postprocessors][crate::Postprocessor].
 
 use std::cell::LazyCell;
-
-use pulldown_cmark::{CowStr, Event, Tag};
+use pulldown_cmark::{CodeBlockKind, CowStr, Event, Tag};
 use regex::Regex;
 use serde_yaml::Value;
+use std::string::String;
 
 use super::{Context, MarkdownEvents, PostprocessorResult};
 
@@ -53,6 +53,36 @@ fn filter_by_tags_(
     } else {
         PostprocessorResult::Continue
     }
+}
+
+pub fn remove_toc(_context: &mut Context, events: &mut MarkdownEvents) -> PostprocessorResult {
+    let mut output = Vec::with_capacity(events.len());
+
+    for event in &mut *events {
+        output.push(event.to_owned());
+        match event {
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(ref language_tag))) => {
+                if language_tag == &CowStr::from("toc")
+                    || language_tag == &CowStr::from("table-of-contents")
+                {
+                    output.pop(); // Remove codeblock start tag that was pushed onto output
+                }
+            }
+            Event::End(Tag::CodeBlock(CodeBlockKind::Fenced(ref language_tag))) => {
+                if language_tag == &CowStr::from("toc")
+                    || language_tag == &CowStr::from("table-of-contents")
+                {
+                    // The corresponding codeblock start tag for this is replaced with regular
+                    // text (containing the Hugo shortcode), so we must also pop this end tag.
+                    output.pop();
+                }
+            }
+            _ => {}
+        }
+    }
+    eprintln!("OUTPUT ---- {:?}", output);
+    *events = output;
+    PostprocessorResult::Continue
 }
 
 //Available strategies for what to do with comments
