@@ -1,12 +1,20 @@
+use std::env;
+use std::path::PathBuf;
+
 use eyre::{eyre, Result};
 use gumdrop::Options;
-use obsidian_export::{postprocessors::*, ExportError};
-use obsidian_export::{Exporter, FrontmatterStrategy, WalkOptions};
-use std::{env, path::PathBuf};
+use obsidian_export::postprocessors::{
+    filter_by_tags,
+    remove_obsidian_comments,
+    softbreaks_to_hardbreaks,
+    CommentStrategy,
+};
+use obsidian_export::{ExportError, Exporter, FrontmatterStrategy, WalkOptions};
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 #[derive(Debug, Options)]
+#[allow(clippy::struct_excessive_bools)]
 struct Opts {
     #[options(help = "Display program help")]
     help: bool,
@@ -56,6 +64,14 @@ struct Opts {
 
     #[options(
         no_short,
+        help = "Preserve the mtime of exported files",
+        default = "false"
+    )]
+    preserve_mtime: bool,
+
+    #[options(
+        help = "Comment strategy (one of: keep-unchanged or remove)",
+        no_short,
         help = "Convert soft line breaks to hard line breaks. This mimics Obsidian's 'Strict line breaks' setting",
         default = "false"
     )]
@@ -63,17 +79,16 @@ struct Opts {
 
     #[options(
         no_short,
+        long = "comments",
+        parse(try_from_str = "comment_strategy_from_str"),
+        default = "keep-unchanged"
+    )]
+    comment_strategy: CommentStrategy,
         help = "Remove automatic-table-of-contents objects",
         default = "false"
     )]
     remove_table_of_contents: bool,
 
-    #[options(
-        no_short,
-        help = "Remove Obsidian style comments from exported file",
-        default = "false"
-    )]
-    remove_obsidian_comments: bool,
 }
 
 fn frontmatter_strategy_from_str(input: &str) -> Result<FrontmatterStrategy> {
@@ -85,12 +100,20 @@ fn frontmatter_strategy_from_str(input: &str) -> Result<FrontmatterStrategy> {
     }
 }
 
+fn comment_strategy_from_str(input: &str) -> Result<CommentStrategy> {
+    match input {
+        "keep-unchanged" => Ok(CommentStrategy::KeepUnchanged),
+        "remove" => Ok(CommentStrategy::Remove),
+        _ => Err(eyre!("must be one of: keep-unchanged or remove")),
+    }
+}
+
 fn main() {
     // Due to the use of free arguments in Opts, we must bypass Gumdrop to determine whether the
     // version flag was specified. Without this, "missing required free argument" would get printed
     // when no other args are specified.
     if env::args().any(|arg| arg == "-v" || arg == "--version") {
-        println!("obsidian-export {}", VERSION);
+        println!("obsidian-export {VERSION}");
         std::process::exit(0);
     }
 
@@ -108,17 +131,19 @@ fn main() {
     let mut exporter = Exporter::new(root, destination);
     exporter.frontmatter_strategy(args.frontmatter_strategy);
     exporter.process_embeds_recursively(!args.no_recursive_embeds);
+    exporter.preserve_mtime(args.preserve_mtime);
     exporter.walk_options(walk_options);
 
     if args.hard_linebreaks {
         exporter.add_postprocessor(&softbreaks_to_hardbreaks);
     }
 
+
     if args.remove_table_of_contents {
         exporter.add_postprocessor(&remove_toc);
     }
 
-    if args.remove_obsidian_comments {
+    if matches!(args.comment_strategy, CommentStrategy::Remove) {
         exporter.add_postprocessor(&remove_obsidian_comments);
     }
 
@@ -129,6 +154,9 @@ fn main() {
         exporter.start_at(path);
     }
 
+    #[allow(clippy::pattern_type_mismatch)]
+    #[allow(clippy::ref_patterns)]
+    #[allow(clippy::shadow_unrelated)]
     if let Err(err) = exporter.run() {
         match err {
             ExportError::FileExportError {
@@ -150,7 +178,7 @@ fn main() {
                     for (idx, path) in file_tree.iter().enumerate() {
                         eprintln!("  {}-> {}", "  ".repeat(idx), path.display());
                     }
-                    eprintln!("\nHint: Ensure notes are non-recursive, or specify --no-recursive-embeds to break cycles")
+                    eprintln!("\nHint: Ensure notes are non-recursive, or specify --no-recursive-embeds to break cycles");
                 }
                 _ => eprintln!("Error: {:?}", eyre!(err)),
             },

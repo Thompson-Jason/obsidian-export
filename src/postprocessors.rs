@@ -1,16 +1,18 @@
 //! A collection of officially maintained [postprocessors][crate::Postprocessor].
 
-use super::{Context, MarkdownEvents, PostprocessorResult};
+use std::cell::LazyCell;
 use pulldown_cmark::{CodeBlockKind, CowStr, Event, Tag};
 use regex::Regex;
 use serde_yaml::Value;
 use std::string::String;
 
+use super::{Context, MarkdownEvents, PostprocessorResult};
+
 /// This postprocessor converts all soft line breaks to hard line breaks. Enabling this mimics
 /// Obsidian's _'Strict line breaks'_ setting.
 pub fn softbreaks_to_hardbreaks(
     _context: &mut Context,
-    events: &mut MarkdownEvents,
+    events: &mut MarkdownEvents<'_>,
 ) -> PostprocessorResult {
     for event in events.iter_mut() {
         if event == &Event::SoftBreak {
@@ -23,8 +25,8 @@ pub fn softbreaks_to_hardbreaks(
 pub fn filter_by_tags(
     skip_tags: Vec<String>,
     only_tags: Vec<String>,
-) -> impl Fn(&mut Context, &mut MarkdownEvents) -> PostprocessorResult {
-    move |context: &mut Context, _events: &mut MarkdownEvents| -> PostprocessorResult {
+) -> impl Fn(&mut Context, &mut MarkdownEvents<'_>) -> PostprocessorResult {
+    move |context: &mut Context, _events: &mut MarkdownEvents<'_>| -> PostprocessorResult {
         match context.frontmatter.get("tags") {
             None => filter_by_tags_(&[], &skip_tags, &only_tags),
             Some(Value::Sequence(tags)) => filter_by_tags_(tags, &skip_tags, &only_tags),
@@ -83,13 +85,27 @@ pub fn remove_toc(_context: &mut Context, events: &mut MarkdownEvents) -> Postpr
     PostprocessorResult::Continue
 }
 
+//Available strategies for what to do with comments
+#[derive(Debug)]
+#[non_exhaustive]
+pub enum CommentStrategy {
+    // Leave comments alone and export them as normal
+    KeepUnchanged,
+    // Remove any comments from the output
+    Remove,
+}
+
+#[allow(clippy::arithmetic_side_effects)]
+/// This postprocessor removes all Obsidian comments from a file excluding codeblocks. Enabling this
+/// prohibits comments from being exported but leaves them untouched in the original files
 pub fn remove_obsidian_comments(
     _context: &mut Context,
-    events: &mut MarkdownEvents,
+    events: &mut MarkdownEvents<'_>,
 ) -> PostprocessorResult {
     let mut output = Vec::with_capacity(events.len());
     let mut inside_comment = false;
     let mut inside_codeblock = false;
+    let re = LazyCell::new(|| Regex::new(r"%%.*?%%").unwrap());
 
     for event in &mut *events {
         output.push(event.to_owned());
@@ -101,7 +117,9 @@ pub fn remove_obsidian_comments(
                         output.pop(); //Inside block comment so remove
                     }
                     continue;
-                } else if inside_codeblock {
+                }
+
+                if inside_codeblock {
                     continue; //Skip anything inside codeblocks
                 }
 
@@ -113,7 +131,6 @@ pub fn remove_obsidian_comments(
                 }
 
                 if !text.eq(&CowStr::from("%%")) {
-                    let re = Regex::new(r"%%.*?%%").unwrap();
                     let result = re.replace_all(text, "").to_string();
                     output.push(Event::Text(CowStr::from(result)));
                     continue;
@@ -122,14 +139,25 @@ pub fn remove_obsidian_comments(
                 inside_comment = true;
             }
             Event::Start(Tag::CodeBlock(_)) => {
-                inside_codeblock = true;
+                if inside_comment {
+                    output.pop();
+                } else {
+                    inside_codeblock = true;
+                }
             }
             Event::End(Tag::CodeBlock(_)) => {
-                inside_codeblock = false;
+                if inside_comment {
+                    output.pop();
+                } else {
+                    inside_codeblock = false;
+                }
             }
             Event::End(Tag::Paragraph) => {
-                if output[output.len() - 2] == Event::Start(Tag::Paragraph) {
-                    // If the comment was the only item on the line remove the start and end paragraph events to remove the \n in the output file.
+                if output.len() >= 2
+                    && output.get(output.len() - 2) == Option::from(&Event::Start(Tag::Paragraph))
+                {
+                    // If the comment was the only item on the line remove the start and end
+                    // paragraph events to remove the \n in the output file.
                     output.pop();
                     output.pop();
                 }
@@ -148,8 +176,8 @@ pub fn remove_obsidian_comments(
 #[test]
 fn test_filter_tags() {
     let tags = vec![
-        Value::String("skip".to_string()),
-        Value::String("publish".to_string()),
+        Value::String("skip".into()),
+        Value::String("publish".into()),
     ];
     let empty_tags = vec![];
     assert_eq!(
@@ -163,37 +191,37 @@ fn test_filter_tags() {
         "When no exclusion & inclusion are specified, files with tags are included"
     );
     assert_eq!(
-        filter_by_tags_(&tags, &["exclude".to_string()], &[]),
+        filter_by_tags_(&tags, &["exclude".into()], &[]),
         PostprocessorResult::Continue,
         "When exclusion tags don't match files with tags are included"
     );
     assert_eq!(
-        filter_by_tags_(&empty_tags, &["exclude".to_string()], &[]),
+        filter_by_tags_(&empty_tags, &["exclude".into()], &[]),
         PostprocessorResult::Continue,
         "When exclusion tags don't match files without tags are included"
     );
     assert_eq!(
-        filter_by_tags_(&tags, &[], &["publish".to_string()]),
+        filter_by_tags_(&tags, &[], &["publish".into()]),
         PostprocessorResult::Continue,
         "When exclusion tags don't match files with tags are included"
     );
     assert_eq!(
-        filter_by_tags_(&empty_tags, &[], &["include".to_string()]),
+        filter_by_tags_(&empty_tags, &[], &["include".into()]),
         PostprocessorResult::StopAndSkipNote,
         "When inclusion tags are specified files without tags are excluded"
     );
     assert_eq!(
-        filter_by_tags_(&tags, &[], &["include".to_string()]),
+        filter_by_tags_(&tags, &[], &["include".into()]),
         PostprocessorResult::StopAndSkipNote,
         "When exclusion tags don't match files with tags are exluded"
     );
     assert_eq!(
-        filter_by_tags_(&tags, &["skip".to_string()], &["skip".to_string()]),
+        filter_by_tags_(&tags, &["skip".into()], &["skip".into()]),
         PostprocessorResult::StopAndSkipNote,
         "When both inclusion and exclusion tags are the same exclusion wins"
     );
     assert_eq!(
-        filter_by_tags_(&tags, &["skip".to_string()], &["publish".to_string()]),
+        filter_by_tags_(&tags, &["skip".into()], &["publish".into()]),
         PostprocessorResult::StopAndSkipNote,
         "When both inclusion and exclusion tags match exclusion wins"
     );
